@@ -17,8 +17,8 @@ SAMDTimer ITimer(SELECTED_TIMER);
 #define GLIDE_PIN A2
 #define CV_PIN A3
 #define TUNING_PIN A4
-#define DAC_1_PIN A0
-#define DAC_2_PIN A1
+#define DAC_1_PIN A1
+#define DAC_2_PIN A0
 #define OSC_1_DETUNE_PIN A5
 #define OSC_1_WAVEFORM_UP_PIN 22
 #define OSC_1_WAVEFORM_DOWN_PIN 21
@@ -37,7 +37,7 @@ Adafruit_DotStar strip(NUM_LEDS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
 #define DAC_HIGH 4095.0
 
 // Define parameters
-const float baseFrequency = 32.704;
+const float baseFrequency = 32.704; // C1
 const double voltageRange[2] = {0, ANALOG_HIGH};
 const double tuningRange[2] = {0.5, 2};
 const double detuneRange[2] = {0.1, 2};
@@ -59,7 +59,8 @@ enum Waveform
     SAWTOOTH,
     SQUARE,
     TRIANGLE,
-    SINE
+    SINE,
+    __COUNT // This allows us to get the length of the enum
 };
 
 struct Oscillator
@@ -80,7 +81,7 @@ struct Oscillator
 Oscillator oscillators[2] = {
     // Oscillator 1
     {
-        outputPin : DAC_2_PIN,
+        outputPin : DAC_1_PIN,
         detunePin : OSC_1_DETUNE_PIN,
         waveformPins : {OSC_1_WAVEFORM_UP_PIN, OSC_1_WAVEFORM_DOWN_PIN},
         octavePins : {OSC_1_OCTAVE_UP_PIN, OSC_1_OCTAVE_DOWN_PIN},
@@ -94,7 +95,7 @@ Oscillator oscillators[2] = {
     },
     // Oscillator 2
     {
-        outputPin : DAC_1_PIN,
+        outputPin : DAC_2_PIN,
         detunePin : OSC_2_DETUNE_PIN,
         waveformPins : {OSC_2_WAVEFORM_UP_PIN, OSC_2_WAVEFORM_DOWN_PIN},
         octavePins : {OSC_2_OCTAVE_UP_PIN, OSC_2_OCTAVE_DOWN_PIN},
@@ -109,26 +110,25 @@ Oscillator oscillators[2] = {
 
 int oscillatorCount = sizeof(oscillators) / sizeof(oscillators[0]);
 
-unsigned long lastUpdateTime = 0;
-const unsigned long updateInterval = 50;
+unsigned long loopLastUpdateTime = 0;
+const unsigned long loopUpdateInterval = 50;
 
 void setup()
 {
-    pinMode(OSC_1_WAVEFORM_UP_PIN, INPUT_PULLDOWN);
-    pinMode(OSC_1_WAVEFORM_DOWN_PIN, INPUT_PULLDOWN);
-    pinMode(OSC_1_OCTAVE_UP_PIN, INPUT_PULLDOWN);
-    pinMode(OSC_1_OCTAVE_DOWN_PIN, INPUT_PULLDOWN);
-    pinMode(OSC_2_WAVEFORM_UP_PIN, INPUT_PULLDOWN);
-    pinMode(OSC_2_WAVEFORM_DOWN_PIN, INPUT_PULLDOWN);
-    pinMode(OSC_2_OCTAVE_UP_PIN, INPUT_PULLDOWN);
-    pinMode(OSC_2_OCTAVE_DOWN_PIN, INPUT_PULLDOWN);
+    for (int i = 0; i < oscillatorCount; i++)
+    {
+        pinMode(oscillators[i].waveformPins[0], INPUT_PULLDOWN);
+        pinMode(oscillators[i].waveformPins[1], INPUT_PULLDOWN);
+        pinMode(oscillators[i].octavePins[0], INPUT_PULLDOWN);
+        pinMode(oscillators[i].octavePins[1], INPUT_PULLDOWN);
+    }
 
     ITimer.attachInterruptInterval(TIMER_INTERVAL_US, updateVCO);
 
     strip.begin();
     strip.show();
 
-    Serial.begin(9600);
+    Serial.begin(115200);
 
     for (int i = 0; i < SAMPLE_RATE; i++)
     {
@@ -140,16 +140,19 @@ void loop()
 {
     unsigned long now = millis();
 
-    if (now - lastUpdateTime >= updateInterval)
+    if (now - loopLastUpdateTime >= loopUpdateInterval)
     {
         // Record the last update time
-        lastUpdateTime = now;
+        loopLastUpdateTime = now;
 
         uint32_t inputVoltage = analogRead(CV_PIN);
         uint32_t glideVoltage = analogRead(GLIDE_PIN);
         uint32_t tuningVoltage = analogRead(TUNING_PIN);
         uint32_t osc1Detune = analogRead(oscillators[0].detunePin);
         uint32_t osc2Detune = analogRead(oscillators[1].detunePin);
+
+        handleWaveformChange();
+        handleOctaveChange();
 
         // Get smoothed glide factor
         float glideValue = scale(glideVoltage, voltageRange, glideRange);
@@ -159,6 +162,10 @@ void loop()
         float tunedFrequency = baseFrequency * scale(tuningVoltage, voltageRange, tuningRange);
         smoothedTunedFrequency = (smoothingFactor * tunedFrequency) + ((1 - smoothingFactor) * smoothedTunedFrequency);
 
+                // Get smoothed control voltage
+        float controlFrequency = smoothedTunedFrequency * pow(2, inputVoltage * 5 / ANALOG_HIGH);
+        smoothedControlFrequency = (smoothedGlideFactor * controlFrequency) + ((1 - smoothedGlideFactor) * smoothedControlFrequency);
+
         // Get smoothed oscillator detune factor
         oscillators[0].detuneFactor = scale(osc1Detune, voltageRange, detuneRange);
         smoothedOsc1DetuneFactor = (smoothingFactor * oscillators[0].detuneFactor) + ((1 - smoothingFactor) * smoothedOsc1DetuneFactor);
@@ -166,24 +173,14 @@ void loop()
         oscillators[1].detuneFactor = scale(osc2Detune, voltageRange, detuneRange);
         smoothedOsc2DetuneFactor = (smoothingFactor * oscillators[1].detuneFactor) + ((1 - smoothingFactor) * smoothedOsc2DetuneFactor);
 
-        // Get smoothed control voltage
-        float controlFrequency = smoothedTunedFrequency * pow(2, inputVoltage * 5 / ANALOG_HIGH);
-        smoothedControlFrequency = (smoothedGlideFactor * controlFrequency) + ((1 - smoothedGlideFactor) * smoothedControlFrequency);
-
-        handleWaveformChange();
-        handleOctaveChange();
-
         oscillators[0].phaseIncrement = (smoothedControlFrequency * smoothedOsc1DetuneFactor * pow(2, oscillators[0].octave)) / SAMPLE_RATE;
         oscillators[1].phaseIncrement = (smoothedControlFrequency * smoothedOsc2DetuneFactor * pow(2, oscillators[1].octave)) / SAMPLE_RATE;
 
-        Serial.println(smoothedTunedFrequency);
-        Serial.println(smoothedControlFrequency);
-        Serial.println(oscillators[0].waveform);
-        Serial.println(oscillators[0].octave);
-        Serial.println(oscillators[1].waveform);
-        Serial.println(oscillators[1].octave);
-        Serial.println(oscillators[0].detuneFactor);
-        Serial.println(oscillators[1].detuneFactor);
+        String blank = "";
+        String tab = "\t";
+        Serial.println(blank + "FREQ" + tab + "DET" + tab + "WAVE" + tab + "OCT");
+        Serial.println(blank + smoothedTunedFrequency + tab + oscillators[0].detuneFactor + tab + oscillators[0].waveform + tab + oscillators[0].octave);
+        Serial.println(blank + smoothedControlFrequency + tab + oscillators[1].detuneFactor + tab + oscillators[1].waveform + tab + oscillators[1].octave);
         Serial.println("--------------------");
 
         strip.setPixelColor(0, strip.Color(0, 64 * tuningVoltage / ANALOG_HIGH, 64 * inputVoltage / ANALOG_HIGH));
@@ -237,12 +234,12 @@ void handleWaveformChange()
     for (int i = 0; i < oscillatorCount; i++)
     {
         Oscillator &osc = oscillators[i];
-        int numWaveforms = sizeof(Waveform) - 1;
+        int maxWaveformIndex = static_cast<Waveform>(__COUNT) - 1;
         int waveformIndex = static_cast<Waveform>(osc.waveform);
 
         if (digitalRead(osc.waveformPins[0]) == LOW && osc.waveformLastValue == 1)
         {
-            osc.waveform = osc.waveform == static_cast<Waveform>(numWaveforms) ? static_cast<Waveform>(numWaveforms) : static_cast<Waveform>(waveformIndex + 1);
+            osc.waveform = osc.waveform == static_cast<Waveform>(maxWaveformIndex) ? static_cast<Waveform>(maxWaveformIndex) : static_cast<Waveform>(waveformIndex + 1);
             osc.waveformLastValue = 0;
         }
         else if (digitalRead(osc.waveformPins[1]) == LOW && osc.waveformLastValue == -1)
