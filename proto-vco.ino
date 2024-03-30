@@ -15,14 +15,21 @@ SAMDTimer ITimer(SELECTED_TIMER);
 #define DATAPIN 8
 #define CLOCKPIN 6
 
+#define GLIDE_PIN A2
 #define CV_PIN A3
 #define TUNING_PIN A4
-#define DAC_PIN A0
+#define DAC_1_PIN A0
+#define DAC_2_PIN A1
 #define OSC_1_DETUNE_PIN A5
-#define OSC_1_WAVEFORM_UP_PIN 9
-#define OSC_1_WAVEFORM_DOWN_PIN 10
-#define OSC_1_OCTAVE_UP_PIN 11
+#define OSC_1_WAVEFORM_UP_PIN 22
+#define OSC_1_WAVEFORM_DOWN_PIN 21
+#define OSC_1_OCTAVE_UP_PIN 9
 #define OSC_1_OCTAVE_DOWN_PIN 7
+#define OSC_2_DETUNE_PIN A6
+#define OSC_2_WAVEFORM_UP_PIN 11
+#define OSC_2_WAVEFORM_DOWN_PIN 10
+#define OSC_2_OCTAVE_UP_PIN 13
+#define OSC_2_OCTAVE_DOWN_PIN 12
 
 Adafruit_DotStar strip(NUM_LEDS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
 
@@ -31,30 +38,67 @@ Adafruit_DotStar strip(NUM_LEDS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
 #define DAC_HIGH 4095.0
 
 // Define parameters
-const float baseFrequency = 4.088;
+const float baseFrequency = 16.352;
 const double voltageRange[2] = {0, ANALOG_HIGH};
 const double tuningRange[2] = {0.5, 2};
 const double detuneRange[2] = {0.1, 2};
+const double glideRange[2] = {0.01, 1};
 
 // Variables
 float sineTable[SAMPLE_RATE];
-float phase = 0.0;
-float phaseIncrement = 0.0;
-float sawtoothValue = 0;
-float squareValue = 0;
-float sineValue = 0;
-float triangleValue = 0;
-
-int osc1Waveform = 0;
-int osc1WaveformLastValue = 0;
-int osc1Octave = 0;
-int osc1OctaveLastValue = 0;
 
 // Input voltage smoothing
 float smoothingFactor = 0.1;
+float smoothedGlideFactor = 0.1;
 float smoothedControlVoltage = 0;
 float smoothedTunedFrequency = 0;
 float smoothedOsc1DetuneFactor = 1;
+float smoothedOsc2DetuneFactor = 1;
+
+struct Oscillator
+{
+    int outputPin;
+    int detunePin;
+    int waveformPins[2];
+    int octavePins[2];
+    float detuneFactor;
+    int waveform;
+    int waveformLastValue;
+    int octave;
+    int octaveLastValue;
+    float phase;
+    float phaseIncrement;
+};
+
+Oscillator oscillators[2] = {
+    // Oscillator 1
+    {
+        outputPin : DAC_2_PIN,
+        detunePin : OSC_1_DETUNE_PIN,
+        waveformPins : {OSC_1_WAVEFORM_UP_PIN, OSC_1_WAVEFORM_DOWN_PIN},
+        octavePins : {OSC_1_OCTAVE_UP_PIN, OSC_1_OCTAVE_DOWN_PIN},
+        detuneFactor : 1.0,
+        waveform : 0,
+        waveformLastValue : 0,
+        octave : 0,
+        octaveLastValue : 0,
+        phase : 0.0,
+        phaseIncrement : 0.0
+    },
+    // Oscillator 2
+    {
+        outputPin : DAC_1_PIN,
+        detunePin : OSC_2_DETUNE_PIN,
+        waveformPins : {OSC_2_WAVEFORM_UP_PIN, OSC_2_WAVEFORM_DOWN_PIN},
+        octavePins : {OSC_2_OCTAVE_UP_PIN, OSC_2_OCTAVE_DOWN_PIN},
+        detuneFactor : 1.0,
+        waveform : 0,
+        waveformLastValue : 0,
+        octave : 0,
+        octaveLastValue : 0,
+        phase : 0.0,
+        phaseIncrement : 0.0
+    }};
 
 void setup()
 {
@@ -62,6 +106,10 @@ void setup()
     pinMode(OSC_1_WAVEFORM_DOWN_PIN, INPUT_PULLDOWN);
     pinMode(OSC_1_OCTAVE_UP_PIN, INPUT_PULLDOWN);
     pinMode(OSC_1_OCTAVE_DOWN_PIN, INPUT_PULLDOWN);
+    pinMode(OSC_2_WAVEFORM_UP_PIN, INPUT_PULLDOWN);
+    pinMode(OSC_2_WAVEFORM_DOWN_PIN, INPUT_PULLDOWN);
+    pinMode(OSC_2_OCTAVE_UP_PIN, INPUT_PULLDOWN);
+    pinMode(OSC_2_OCTAVE_DOWN_PIN, INPUT_PULLDOWN);
 
     initSineTable();
 
@@ -76,73 +124,50 @@ void setup()
 void loop()
 {
     uint32_t inputVoltage = analogRead(CV_PIN);
+    uint32_t glideVoltage = analogRead(GLIDE_PIN);
     uint32_t tuningVoltage = analogRead(TUNING_PIN);
-    uint32_t osc1Detune = analogRead(OSC_1_DETUNE_PIN);
+    uint32_t osc1Detune = analogRead(oscillators[0].detunePin);
+    uint32_t osc2Detune = analogRead(oscillators[1].detunePin);
+
+    // Get smoothed glide factor
+    float glideValue = scale(glideVoltage, voltageRange, glideRange);
+    smoothedGlideFactor = (smoothingFactor * glideValue) + ((1 - smoothingFactor) * smoothedGlideFactor);
 
     // Get smoothed tuning frequency
     float tunedFrequency = baseFrequency * scale(tuningVoltage, voltageRange, tuningRange);
     smoothedTunedFrequency = (smoothingFactor * tunedFrequency) + ((1 - smoothingFactor) * smoothedTunedFrequency);
 
     // Get smoothed oscillator detune factor
-    float osc1DetuneFactor = scale(tuningVoltage, voltageRange, detuneRange);
-    smoothedOsc1DetuneFactor = (smoothingFactor * osc1DetuneFactor) + ((1 - smoothingFactor) * smoothedOsc1DetuneFactor);
+    oscillators[0].detuneFactor = scale(osc1Detune, voltageRange, detuneRange);
+    smoothedOsc1DetuneFactor = (smoothingFactor * oscillators[0].detuneFactor) + ((1 - smoothingFactor) * smoothedOsc1DetuneFactor);
+
+    oscillators[1].detuneFactor = scale(osc2Detune, voltageRange, detuneRange);
+    smoothedOsc2DetuneFactor = (smoothingFactor * oscillators[1].detuneFactor) + ((1 - smoothingFactor) * smoothedOsc2DetuneFactor);
 
     // Get smoothed control voltage
     float controlVoltage = smoothedTunedFrequency * pow(2, inputVoltage * 3 / ANALOG_HIGH);
-    smoothedControlVoltage = (smoothingFactor * controlVoltage) + ((1 - smoothingFactor) * smoothedControlVoltage);
+    smoothedControlVoltage = (smoothedGlideFactor * controlVoltage) + ((1 - smoothedGlideFactor) * smoothedControlVoltage);
 
-    // Update waveform state if switch position has changed
-    if (digitalRead(OSC_1_WAVEFORM_UP_PIN) == LOW && osc1WaveformLastValue == 1)
-    {
-        osc1Waveform = osc1Waveform >= 3 ? 3 : osc1Waveform + 1;
-        osc1WaveformLastValue = 0;
-    }
-    else if (digitalRead(OSC_1_WAVEFORM_DOWN_PIN) == LOW && osc1WaveformLastValue == -1)
-    {
-        osc1Waveform = osc1Waveform <= 0 ? 0 : osc1Waveform - 1;
-        osc1WaveformLastValue = 0;
-    }
-    else if (digitalRead(OSC_1_WAVEFORM_UP_PIN) == HIGH)
-    {
-        osc1WaveformLastValue = 1;
-    }
-    else if (digitalRead(OSC_1_WAVEFORM_DOWN_PIN) == HIGH)
-    {
-        osc1WaveformLastValue = -1;
-    }
+    handleWaveformChange();
+    handleOctaveChange();
 
-    // Update octave state if switch position has changed
-    if (digitalRead(OSC_1_OCTAVE_UP_PIN) == LOW && osc1OctaveLastValue == 1)
-    {
-        osc1Octave = osc1Octave >= 3 ? 3 : osc1Octave + 1;
-        osc1OctaveLastValue = 0;
-    }
-    else if (digitalRead(OSC_1_OCTAVE_DOWN_PIN) == LOW && osc1OctaveLastValue == -1)
-    {
-        osc1Octave = osc1Octave <= -3 ? -3 : osc1Octave - 1;
-        osc1OctaveLastValue = 0;
-    }
-    else if (digitalRead(OSC_1_OCTAVE_UP_PIN) == HIGH)
-    {
-        osc1OctaveLastValue = 1;
-    }
-    else if (digitalRead(OSC_1_OCTAVE_DOWN_PIN) == HIGH)
-    {
-        osc1OctaveLastValue = -1;
-    }
+    oscillators[0].phaseIncrement = (smoothedControlVoltage * smoothedOsc1DetuneFactor * pow(2, oscillators[0].octave)) / SAMPLE_RATE;
+    oscillators[1].phaseIncrement = (smoothedControlVoltage * smoothedOsc2DetuneFactor * pow(2, oscillators[1].octave)) / SAMPLE_RATE;
 
-    phaseIncrement = (smoothedControlVoltage * smoothedOsc1DetuneFactor * pow(2, osc1Octave)) / SAMPLE_RATE;
-
-    Serial.println(inputVoltage);
     Serial.println(smoothedTunedFrequency);
     Serial.println(smoothedControlVoltage);
-    Serial.println(osc1Waveform);
-    Serial.println(osc1Octave);
+    Serial.println(oscillators[0].waveform);
+    Serial.println(oscillators[0].octave);
+    Serial.println(oscillators[1].waveform);
+    Serial.println(oscillators[1].octave);
+    Serial.println(oscillators[0].detuneFactor);
+    Serial.println(oscillators[1].detuneFactor);
     Serial.println("--------------------");
 
     strip.setPixelColor(0, strip.Color(0, 64 * tuningVoltage / ANALOG_HIGH, 64 * inputVoltage / ANALOG_HIGH));
     strip.show();
 
+    // TODO: Eliminate this delay and use millis() instead
     delay(10);
 }
 
@@ -178,32 +203,90 @@ float approxSine(float x)
 
 void updateVCO()
 {
-    switch (osc1Waveform)
+    for (int i = 0; i < 2; i++)
     {
-    case 0: // Sawtooth
-        sawtoothValue = phase * DAC_HIGH;
-        analogWrite(DAC_PIN, sawtoothValue);
-        break;
-    case 1: // Square
-        squareValue = round(phase) * DAC_HIGH;
-        analogWrite(DAC_PIN, squareValue);
-        break;
-    case 2: // Triangle
-        triangleValue = abs((2 * (phase - 0.5)) * DAC_HIGH);
-        analogWrite(DAC_PIN, triangleValue);
-        break;
-    case 3: // Sine
-        sineValue = (approxSine(2 * PI * phase) + 1) * DAC_HIGH / 2;
-        analogWrite(DAC_PIN, sineValue);
-        break;
-    default:
-        break;
-    }
+        Oscillator &osc = oscillators[i];
+        uint32_t output;
 
-    // Update phase accumulator
-    phase += phaseIncrement;
-    if (phase >= 1.0)
+        switch (osc.waveform)
+        {
+        case 0: // Sawtooth
+            output = osc.phase * DAC_HIGH;
+            break;
+        case 1: // Square
+            output = round(osc.phase) * DAC_HIGH;
+            break;
+        case 2: // Triangle
+            output = abs((2 * (osc.phase - 0.5)) * DAC_HIGH);
+            break;
+        // TODO: Sine wave is currently causing problems        
+        // case 3: // Sine
+        //     output = (approxSine(2 * PI * osc.phase) + 1) * DAC_HIGH / 2;
+        //     break;
+        default:
+            break;
+        }
+
+        analogWrite(osc.outputPin, osc.phase * DAC_HIGH);
+
+        // Update phase accumulator
+        osc.phase += osc.phaseIncrement;
+        if (osc.phase >= 1.0)
+        {
+            osc.phase -= 1.0;
+        }
+    }
+}
+
+void handleWaveformChange()
+{
+    for (int i = 0; i < 2; i++)
     {
-        phase -= 1.0;
+        Oscillator &osc = oscillators[i];
+
+        if (digitalRead(oscillators[i].waveformPins[0]) == LOW && oscillators[i].waveformLastValue == 1)
+        {
+            oscillators[i].waveform = oscillators[i].waveform >= 2 ? 2 : oscillators[i].waveform + 1;
+            oscillators[i].waveformLastValue = 0;
+        }
+        else if (digitalRead(oscillators[i].waveformPins[1]) == LOW && oscillators[i].waveformLastValue == -1)
+        {
+            oscillators[i].waveform = oscillators[i].waveform <= 0 ? 0 : oscillators[i].waveform - 1;
+            oscillators[i].waveformLastValue = 0;
+        }
+        else if (digitalRead(oscillators[i].waveformPins[0]) == HIGH)
+        {
+            oscillators[i].waveformLastValue = 1;
+        }
+        else if (digitalRead(oscillators[i].waveformPins[1]) == HIGH)
+        {
+            oscillators[i].waveformLastValue = -1;
+        }
+    }
+}
+void handleOctaveChange()
+{
+    for (int i = 0; i < 2; i++)
+    {
+        Oscillator &osc = oscillators[i];
+
+        if (digitalRead(osc.octavePins[0]) == LOW && osc.octaveLastValue == 1)
+        {
+            osc.octave = osc.octave >= 3 ? 3 : osc.octave + 1;
+            osc.octaveLastValue = 0;
+        }
+        else if (digitalRead(osc.octavePins[1]) == LOW && osc.octaveLastValue == -1)
+        {
+            osc.octave = osc.octave <= -3 ? -3 : osc.octave - 1;
+            osc.octaveLastValue = 0;
+        }
+        else if (digitalRead(osc.octavePins[0]) == HIGH)
+        {
+            osc.octaveLastValue = 1;
+        }
+        else if (digitalRead(osc.octavePins[1]) == HIGH)
+        {
+            osc.octaveLastValue = -1;
+        }
     }
 }
