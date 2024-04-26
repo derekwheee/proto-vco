@@ -19,16 +19,16 @@ SAMDTimer ITimer(SELECTED_TIMER);
 #define TUNING_PIN A4
 #define DAC_1_PIN A1
 #define DAC_2_PIN A0
-#define OSC_1_DETUNE_PIN A5
-#define OSC_1_WAVEFORM_UP_PIN 22
-#define OSC_1_WAVEFORM_DOWN_PIN 21
-#define OSC_1_OCTAVE_UP_PIN 9
-#define OSC_1_OCTAVE_DOWN_PIN 7
-#define OSC_2_DETUNE_PIN A6
-#define OSC_2_WAVEFORM_UP_PIN 11
-#define OSC_2_WAVEFORM_DOWN_PIN 10
-#define OSC_2_OCTAVE_UP_PIN 13
-#define OSC_2_OCTAVE_DOWN_PIN 12
+#define OSC_1_DETUNE_PIN A6
+#define OSC_1_WAVEFORM_UP_PIN 11
+#define OSC_1_WAVEFORM_DOWN_PIN 10
+#define OSC_1_OCTAVE_UP_PIN 13
+#define OSC_1_OCTAVE_DOWN_PIN 12
+#define OSC_2_DETUNE_PIN A5
+#define OSC_2_WAVEFORM_UP_PIN 22
+#define OSC_2_WAVEFORM_DOWN_PIN 21
+#define OSC_2_OCTAVE_UP_PIN 9
+#define OSC_2_OCTAVE_DOWN_PIN 7
 
 Adafruit_DotStar strip(NUM_LEDS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
 
@@ -40,14 +40,14 @@ Adafruit_DotStar strip(NUM_LEDS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
 const float baseFrequency = 32.704; // C1
 const double voltageRange[2] = {0, ANALOG_HIGH};
 const double tuningRange[2] = {0.5, 2};
-const double detuneRange[2] = {0.1, 2};
-const double glideRange[2] = {0.01, 1};
+const double detuneRange[2] = {0.5, 2};
+const double glideRange[2] = {1, 0.01};
 
 // Variables
 float sineTable[SAMPLE_RATE];
 
 // Input voltage smoothing
-float smoothingFactor = 0.1;
+float smoothingFactor = 0.2;
 float smoothedGlideFactor = 0.1;
 float smoothedControlFrequency = 0;
 float smoothedTunedFrequency = 0;
@@ -180,8 +180,9 @@ void loop()
         String tab = "\t";
         Serial.println(blank + "FREQ" + tab + "DET" + tab + "WAVE" + tab + "OCT");
         Serial.println(blank + smoothedTunedFrequency + tab + oscillators[0].detuneFactor + tab + oscillators[0].waveform + tab + oscillators[0].octave);
-        Serial.println(blank + smoothedControlFrequency + tab + oscillators[1].detuneFactor + tab + oscillators[1].waveform + tab + oscillators[1].octave);
+        Serial.println(blank + smoothedGlideFactor + tab + oscillators[1].detuneFactor + tab + oscillators[1].waveform + tab + oscillators[1].octave);
         Serial.println("--------------------");
+        Serial.println(oscillators[0].waveform == SAWTOOTH);
 
         strip.setPixelColor(0, strip.Color(0, 64 * tuningVoltage / ANALOG_HIGH, 64 * inputVoltage / ANALOG_HIGH));
         strip.show();
@@ -218,7 +219,7 @@ void updateVCO()
             break;
         }
 
-        analogWrite(osc.outputPin, osc.phase * DAC_HIGH);
+        analogWrite(osc.outputPin, output);
 
         // Update phase accumulator
         osc.phase += osc.phaseIncrement;
