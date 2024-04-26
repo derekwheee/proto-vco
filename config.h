@@ -1,0 +1,27 @@
+// Timer config
+#define SAMPLE_RATE 6000
+#define USING_TIMER_TC3 true
+#define SELECTED_TIMER TIMER_TC3
+#define TIMER_INTERVAL_US 100000 / SAMPLE_RATE
+
+// DotStar config
+#define NUM_LEDS 1
+#define DATAPIN 8
+#define CLOCKPIN 6
+
+// Pin mapping
+#define GLIDE_PIN A2
+#define CV_PIN A3
+#define TUNING_PIN A4
+#define DAC_1_PIN A1
+#define DAC_2_PIN A0
+#define OSC_1_DETUNE_PIN A6
+#define OSC_1_WAVEFORM_UP_PIN 11
+#define OSC_1_WAVEFORM_DOWN_PIN 10
+#define OSC_1_OCTAVE_UP_PIN 13
+#define OSC_1_OCTAVE_DOWN_PIN 12
+#define OSC_2_DETUNE_PIN A5
+#define OSC_2_WAVEFORM_UP_PIN 22
+#define OSC_2_WAVEFORM_DOWN_PIN 21
+#define OSC_2_OCTAVE_UP_PIN 9
+#define OSC_2_OCTAVE_DOWN_PIN 7

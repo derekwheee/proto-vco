@@ -1,40 +1,17 @@
+// TODO: OSC_1 detune pot isn't working, ground is disconnected
+// TODO: Triangle oscillator has a high pitch ring and clips
+// TODO: See if shortening the loop interval improves glide
+
 #include "SAMDTimerInterrupt.h"
 #include <Adafruit_DotStar.h>
-
-// Timer config
-#define SAMPLE_RATE 6000
-#define USING_TIMER_TC3 true
-#define SELECTED_TIMER TIMER_TC3
-#define TIMER_INTERVAL_US 100000 / SAMPLE_RATE
+#include "config.h"
 
 SAMDTimer ITimer(SELECTED_TIMER);
-
-// DotStar config
-#define NUM_LEDS 1
-#define DATAPIN 8
-#define CLOCKPIN 6
-
-#define GLIDE_PIN A2
-#define CV_PIN A3
-#define TUNING_PIN A4
-#define DAC_1_PIN A1
-#define DAC_2_PIN A0
-#define OSC_1_DETUNE_PIN A6
-#define OSC_1_WAVEFORM_UP_PIN 11
-#define OSC_1_WAVEFORM_DOWN_PIN 10
-#define OSC_1_OCTAVE_UP_PIN 13
-#define OSC_1_OCTAVE_DOWN_PIN 12
-#define OSC_2_DETUNE_PIN A5
-#define OSC_2_WAVEFORM_UP_PIN 22
-#define OSC_2_WAVEFORM_DOWN_PIN 21
-#define OSC_2_OCTAVE_UP_PIN 9
-#define OSC_2_OCTAVE_DOWN_PIN 7
-
-Adafruit_DotStar strip(NUM_LEDS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
+Adafruit_DotStar pixel(NUM_LEDS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
 
 // Constants
-#define ANALOG_HIGH 1023.0
-#define DAC_HIGH 4095.0
+const int ANALOG_HIGH = 1023;
+const int DAC_HIGH = 4095;
 
 // Define parameters
 const float baseFrequency = 32.704; // C1
@@ -42,8 +19,6 @@ const double voltageRange[2] = {0, ANALOG_HIGH};
 const double tuningRange[2] = {0.5, 2};
 const double detuneRange[2] = {0.5, 2};
 const double glideRange[2] = {1, 0.01};
-
-// Variables
 float sineTable[SAMPLE_RATE];
 
 // Input voltage smoothing
@@ -59,7 +34,6 @@ enum Waveform
     SAWTOOTH,
     SQUARE,
     TRIANGLE,
-    SINE,
     __COUNT // This allows us to get the length of the enum
 };
 
@@ -125,8 +99,8 @@ void setup()
 
     ITimer.attachInterruptInterval(TIMER_INTERVAL_US, updateVCO);
 
-    strip.begin();
-    strip.show();
+    pixel.begin();
+    pixel.show();
 
     Serial.begin(115200);
 
@@ -162,7 +136,7 @@ void loop()
         float tunedFrequency = baseFrequency * scale(tuningVoltage, voltageRange, tuningRange);
         smoothedTunedFrequency = (smoothingFactor * tunedFrequency) + ((1 - smoothingFactor) * smoothedTunedFrequency);
 
-                // Get smoothed control voltage
+        // Get smoothed control voltage
         float controlFrequency = smoothedTunedFrequency * pow(2, inputVoltage * 5 / ANALOG_HIGH);
         smoothedControlFrequency = (smoothedGlideFactor * controlFrequency) + ((1 - smoothedGlideFactor) * smoothedControlFrequency);
 
@@ -176,16 +150,19 @@ void loop()
         oscillators[0].phaseIncrement = (smoothedControlFrequency * smoothedOsc1DetuneFactor * pow(2, oscillators[0].octave)) / SAMPLE_RATE;
         oscillators[1].phaseIncrement = (smoothedControlFrequency * smoothedOsc2DetuneFactor * pow(2, oscillators[1].octave)) / SAMPLE_RATE;
 
-        String blank = "";
-        String tab = "\t";
-        Serial.println(blank + "FREQ" + tab + "DET" + tab + "WAVE" + tab + "OCT");
-        Serial.println(blank + smoothedTunedFrequency + tab + oscillators[0].detuneFactor + tab + oscillators[0].waveform + tab + oscillators[0].octave);
-        Serial.println(blank + smoothedGlideFactor + tab + oscillators[1].detuneFactor + tab + oscillators[1].waveform + tab + oscillators[1].octave);
-        Serial.println("--------------------");
-        Serial.println(oscillators[0].waveform == SAWTOOTH);
+        if (Serial)
+        {
+            String blank = "";
+            String tab = "\t";
+            Serial.println(blank + "FREQ" + tab + "DET" + tab + "WAVE" + tab + "OCT");
+            Serial.println(blank + smoothedTunedFrequency + tab + oscillators[0].detuneFactor + tab + oscillators[0].waveform + tab + oscillators[0].octave);
+            Serial.println(blank + smoothedGlideFactor + tab + oscillators[1].detuneFactor + tab + oscillators[1].waveform + tab + oscillators[1].octave);
+            Serial.println("--------------------");
+            Serial.println(oscillators[0].waveform == SAWTOOTH);
+        }
 
-        strip.setPixelColor(0, strip.Color(0, 64 * tuningVoltage / ANALOG_HIGH, 64 * inputVoltage / ANALOG_HIGH));
-        strip.show();
+        pixel.setPixelColor(0, pixel.Color(0, 64 * tuningVoltage / ANALOG_HIGH, 64 * inputVoltage / ANALOG_HIGH));
+        pixel.show();
     }
 }
 
@@ -212,8 +189,6 @@ void updateVCO()
         case TRIANGLE:
             output = abs((2 * (osc.phase - 0.5)) * DAC_HIGH);
             break;
-        case SINE:
-            output = sineTable[round(osc.phase * SAMPLE_RATE)] * DAC_HIGH;
             break;
         default:
             break;
