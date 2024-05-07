@@ -1,4 +1,3 @@
-// TODO: OSC_1 detune pot isn't working, ground is disconnected
 // TODO: Triangle oscillator has a high pitch ring and clips
 // TODO: See if shortening the loop interval improves glide
 
@@ -10,8 +9,8 @@ SAMDTimer ITimer(SELECTED_TIMER);
 Adafruit_DotStar pixel(NUM_LEDS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
 
 // Constants
-const int ANALOG_HIGH = 1023;
-const int DAC_HIGH = 4095;
+const float ANALOG_HIGH = 1023.0;
+const float DAC_HIGH = 4095.0;
 
 // Define parameters
 const float baseFrequency = 32.704; // C1
@@ -24,8 +23,8 @@ float sineTable[SAMPLE_RATE];
 // Input voltage smoothing
 float smoothingFactor = 0.2;
 float smoothedGlideFactor = 0.1;
-float smoothedControlFrequency = 0;
-float smoothedTunedFrequency = 0;
+float smoothedControlFrequency = 0.0;
+float smoothedTunedFrequency = 0.0;
 float smoothedOsc1DetuneFactor = 1;
 float smoothedOsc2DetuneFactor = 1;
 
@@ -85,7 +84,7 @@ Oscillator oscillators[2] = {
 int oscillatorCount = sizeof(oscillators) / sizeof(oscillators[0]);
 
 unsigned long loopLastUpdateTime = 0;
-const unsigned long loopUpdateInterval = 50;
+const unsigned long loopUpdateInterval = 10;
 
 void setup()
 {
@@ -155,13 +154,16 @@ void loop()
             String blank = "";
             String tab = "\t";
             Serial.println(blank + "FREQ" + tab + "DET" + tab + "WAVE" + tab + "OCT");
-            Serial.println(blank + smoothedTunedFrequency + tab + oscillators[0].detuneFactor + tab + oscillators[0].waveform + tab + oscillators[0].octave);
-            Serial.println(blank + smoothedGlideFactor + tab + oscillators[1].detuneFactor + tab + oscillators[1].waveform + tab + oscillators[1].octave);
+            Serial.println(blank + inputVoltage + tab + oscillators[0].detuneFactor + tab + oscillators[0].waveform + tab + oscillators[0].octave);
+            Serial.println(blank + glideVoltage + tab + oscillators[1].detuneFactor + tab + oscillators[1].waveform + tab + oscillators[1].octave);
             Serial.println("--------------------");
-            Serial.println(oscillators[0].waveform == SAWTOOTH);
         }
 
-        pixel.setPixelColor(0, pixel.Color(0, 64 * tuningVoltage / ANALOG_HIGH, 64 * inputVoltage / ANALOG_HIGH));
+        pixel.setPixelColor(0, pixel.Color(
+            255 * tuningVoltage / ANALOG_HIGH,
+            255 * (oscillators[0].phaseIncrement * SAMPLE_RATE / 4000),
+            255 * (oscillators[1].phaseIncrement * SAMPLE_RATE / 4000)
+        ));
         pixel.show();
     }
 }
