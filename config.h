@@ -1,5 +1,5 @@
 // Timer config
-#define SAMPLE_RATE 6000
+#define SAMPLE_RATE 20000
 #define USING_TIMER_TC3 true
 #define SELECTED_TIMER TIMER_TC3
 #define TIMER_INTERVAL_US 100000 / SAMPLE_RATE

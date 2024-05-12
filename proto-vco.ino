@@ -1,6 +1,3 @@
-// TODO: Triangle oscillator has a high pitch ring and clips
-// TODO: See if shortening the loop interval improves glide
-
 #include "SAMDTimerInterrupt.h"
 #include <Adafruit_DotStar.h>
 #include "config.h"
@@ -18,7 +15,6 @@ const double voltageRange[2] = {0, ANALOG_HIGH};
 const double tuningRange[2] = {0.5, 2};
 const double detuneRange[2] = {0.5, 2};
 const double glideRange[2] = {1, 0.01};
-float sineTable[SAMPLE_RATE];
 
 // Input voltage smoothing
 float smoothingFactor = 0.2;
@@ -102,11 +98,6 @@ void setup()
     pixel.show();
 
     Serial.begin(115200);
-
-    for (int i = 0; i < SAMPLE_RATE; i++)
-    {
-        sineTable[i] = sin(i / 6000);
-    }
 }
 
 void loop()
